@@ -88,9 +88,7 @@ document.addEventListener('DOMContentLoaded', () => {
             gameItem.rel = "noopener noreferrer";
             gameItem.innerHTML = `
                 <h3 class="game-title">${site.title}</h3>
-                <div class="login-button">
-                    <span>DAFTAR SEKARANG</span>
-                </div>
+                <button class="login-button">DAFTAR SEKARANG</button>
             `;
             gameGrid.appendChild(gameItem);
         });
