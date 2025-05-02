@@ -423,22 +423,27 @@ body {
     top: 100%;
     left: 0;
     right: 0;
-    background: rgba(0, 0, 0, 0.9);
-    border: 1px solid #444;
-    border-radius: 4px;
+    background: rgba(8, 45, 56, 0.95);
+    border: 1px solid var(--primary);
+    border-radius: 8px;
     margin-top: 5px;
     display: none;
     z-index: 1000;
+    overflow: hidden;
 }
 
 .suggestion-item {
-    padding: 10px 15px;
+    padding: 12px 20px;
     cursor: pointer;
-    color: #fff;
+    color: var(--light);
+    text-transform: uppercase;
+    font-weight: bold;
+    transition: all 0.3s ease;
 }
 
 .suggestion-item:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--gradient);
+    color: white;
 }
 
 .search-box {
