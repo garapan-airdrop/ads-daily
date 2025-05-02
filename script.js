@@ -113,28 +113,33 @@ document.addEventListener('DOMContentLoaded', () => {
     suggestions.className = 'search-suggestions';
     searchBox.appendChild(suggestions);
 
+    // Hide all items initially
+    document.querySelectorAll(".game-item").forEach(item => {
+        item.style.display = "none";
+    });
+
     searchInput?.addEventListener("input", (e) => {
         const searchTerm = e.target.value.toLowerCase();
         const gameItems = document.querySelectorAll(".game-item");
 
-        if (searchTerm.length > 0) {
-            const matchingTitles = Array.from(gameItems)
-                .map(item => item.querySelector(".game-title").textContent)
-                .filter(title => title.toLowerCase().includes(searchTerm))
-                .slice(0, 5);
+        if (searchTerm.startsWith("tampilkankonten_") || 
+            searchTerm.startsWith("tampilkan_") || 
+            searchTerm.startsWith("buka_")) {
+            
+            const keyword = searchTerm.split("_")[1];
+            
+            gameItems.forEach(item => {
+                const title = item.querySelector(".game-title").textContent.toLowerCase();
+                item.style.display = title.includes(keyword) ? "" : "none";
+            });
 
-            suggestions.innerHTML = matchingTitles
-                .map(title => `<div class="suggestion-item">${title}</div>`)
-                .join('');
-            suggestions.style.display = matchingTitles.length ? 'block' : 'none';
+            suggestions.style.display = 'none';
         } else {
+            gameItems.forEach(item => {
+                item.style.display = "none";
+            });
             suggestions.style.display = 'none';
         }
-
-        gameItems.forEach(item => {
-            const title = item.querySelector(".game-title").textContent.toLowerCase();
-            item.style.display = title.includes(searchTerm) ? "" : "none";
-        });
     });
 
     suggestions.addEventListener('click', (e) => {
