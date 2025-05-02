@@ -81,13 +81,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const gameGrid = document.querySelector('.game-grid');
     if (gameGrid) {
         gameSites.forEach(site => {
-            const gameItem = document.createElement('div');
+            const gameItem = document.createElement('a');
             gameItem.className = 'game-item';
+            gameItem.href = site.url;
+            gameItem.target = "_blank";
+            gameItem.rel = "noopener noreferrer";
             gameItem.innerHTML = `
                 <h3 class="game-title">${site.title}</h3>
-                <a href="${site.url}" target="_blank" rel="noopener noreferrer" class="login-button">
+                <div class="login-button">
                     <span>DAFTAR SEKARANG</span>
-                </a>
+                </div>
             `;
             gameGrid.appendChild(gameItem);
         });
