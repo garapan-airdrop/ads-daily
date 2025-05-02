@@ -122,24 +122,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const searchTerm = e.target.value.toLowerCase();
         const gameItems = document.querySelectorAll(".game-item");
 
-        if (searchTerm.startsWith("tampilkankonten_") || 
-            searchTerm.startsWith("tampilkan_") || 
-            searchTerm.startsWith("buka_")) {
-            
-            const keyword = searchTerm.split("_")[1];
-            
-            gameItems.forEach(item => {
-                const title = item.querySelector(".game-title").textContent.toLowerCase();
-                item.style.display = title.includes(keyword) ? "" : "none";
-            });
-
-            suggestions.style.display = 'none';
-        } else {
-            gameItems.forEach(item => {
-                item.style.display = "none";
-            });
-            suggestions.style.display = 'none';
-        }
+        if (searchTerm.length > 0) {
+        gameItems.forEach(item => {
+            const title = item.querySelector(".game-title").textContent.toLowerCase();
+            item.style.display = title.includes(searchTerm) ? "" : "none";
+        });
+    } else {
+        gameItems.forEach(item => {
+            item.style.display = "none";
+        });
+    }
+    suggestions.style.display = 'none';
     });
 
     suggestions.addEventListener('click', (e) => {
