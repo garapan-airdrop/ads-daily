@@ -184,23 +184,33 @@ body {
     left: 0;
     right: 0;
     background: rgba(8, 45, 56, 0.95);
-    border: 1px solid var(--primary);
-    border-radius: 8px;
-    margin-top: 5px;
+    border: 2px solid var(--primary);
+    border-radius: 12px;
+    margin-top: 8px;
     display: none;
     z-index: 1000;
     overflow: hidden;
+    box-shadow: 0 4px 15px rgba(41, 236, 238, 0.2);
 }
 
 .suggestion-item {
-    padding: 12px 20px;
+    padding: 15px 20px;
     cursor: pointer;
     color: var(--light);
-    transition: background 0.3s;
+    font-weight: bold;
+    text-transform: uppercase;
+    transition: all 0.3s ease;
+    border-bottom: 1px solid rgba(41, 236, 238, 0.1);
+}
+
+.suggestion-item:last-child {
+    border-bottom: none;
 }
 
 .suggestion-item:hover {
-    background: rgba(41, 236, 238, 0.1);
+    background: var(--gradient);
+    color: white;
+    padding-left: 25px;
 }
 
 .search-box {
