@@ -84,21 +84,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const gameItem = document.createElement('div');
             gameItem.className = 'game-item';
             gameItem.innerHTML = `
-                <div class="game-content">
-                    <div class="game-header">
-                        <h3 class="game-title">${site.title}</h3>
-                    </div>
-                    <div class="game-body">
-                        <div class="button-group">
-                            <a href="${site.url}" target="_blank" rel="noopener noreferrer" class="login-button">
-                                <span>DAFTAR</span>
-                            </a>
-                            <a href="${site.url}" target="_blank" rel="noopener noreferrer" class="login-button">
-                                <span>LOGIN</span>
-                            </a>
-                        </div>
-                    </div>
-                </div>
+                <h3 class="game-title">${site.title}</h3>
+                <a href="${site.url}" target="_blank" rel="noopener noreferrer" class="login-button">
+                    <span>DAFTAR SEKARANG</span>
+                </a>
             `;
             gameGrid.appendChild(gameItem);
         });

@@ -302,23 +302,20 @@ body {
     align-items: center;
     justify-content: center;
     width: 100%;
-    background: var(--gradient);
-    color: var(--light);
+    background: #29ecee;
+    color: var(--dark);
     text-decoration: none;
-    padding: 1rem;
-    border-radius: 8px;
+    padding: 0.8rem;
+    border-radius: 4px;
     font-weight: 700;
-    font-size: 1.1rem;
-    letter-spacing: 1px;
+    font-size: 1rem;
     transition: all 0.3s ease;
     text-transform: uppercase;
-    box-shadow: 0 4px 15px rgba(41, 236, 238, 0.2);
 }
 
 .login-button:hover {
+    background: #1cd8da;
     transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(41, 236, 238, 0.3);
-    background: linear-gradient(135deg, #29ecee 0%, #29b5a7 100%);
 }
 
 .login-button:hover {
