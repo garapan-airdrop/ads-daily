@@ -178,6 +178,35 @@ body {
     box-shadow: 0 0 0 2px var(--primary);
 }
 
+.search-suggestions {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: rgba(8, 45, 56, 0.95);
+    border: 1px solid var(--primary);
+    border-radius: 8px;
+    margin-top: 5px;
+    display: none;
+    z-index: 1000;
+    overflow: hidden;
+}
+
+.suggestion-item {
+    padding: 12px 20px;
+    cursor: pointer;
+    color: var(--light);
+    transition: background 0.3s;
+}
+
+.suggestion-item:hover {
+    background: rgba(41, 236, 238, 0.1);
+}
+
+.search-box {
+    position: relative;
+}
+
 .game-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));

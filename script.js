@@ -107,7 +107,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Navigation Toggle
     const navToggle = document.querySelector('.nav-toggle');
     const navMenu = document.querySelector('.nav-menu');
-    
+
     navToggle?.addEventListener('click', () => {
         navMenu.classList.toggle('active');
         const spans = navToggle.querySelectorAll('span');
@@ -117,15 +117,44 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Search Functionality
-    const searchInput = document.getElementById('mySearchHkpro');
-    searchInput?.addEventListener('input', (e) => {
+    const searchInput = document.getElementById("mySearchHkpro");
+    const searchBox = searchInput.parentElement;
+    const suggestions = document.createElement('div');
+    suggestions.className = 'search-suggestions';
+    searchBox.appendChild(suggestions);
+
+    searchInput?.addEventListener("input", (e) => {
         const searchTerm = e.target.value.toLowerCase();
-        const gameItems = document.querySelectorAll('.game-item');
-        
+        const gameItems = document.querySelectorAll(".game-item");
+
+        if (searchTerm.length > 0) {
+            const matchingTitles = Array.from(gameItems)
+                .map(item => item.querySelector(".game-title").textContent)
+                .filter(title => title.toLowerCase().includes(searchTerm))
+                .slice(0, 5);
+
+            suggestions.innerHTML = matchingTitles
+                .map(title => `<div class="suggestion-item">${title}</div>`)
+                .join('');
+            suggestions.style.display = matchingTitles.length ? 'block' : 'none';
+        } else {
+            suggestions.style.display = 'none';
+        }
+
         gameItems.forEach(item => {
-            const title = item.querySelector('.game-title').textContent.toLowerCase();
-            item.style.display = title.includes(searchTerm) ? '' : 'none';
+            const title = item.querySelector(".game-title").textContent.toLowerCase();
+            item.style.display = title.includes(searchTerm) ? "" : "none";
         });
+    });
+
+    suggestions.addEventListener('click', (e) => {
+        if (e.target.classList.contains('suggestion-item')) {
+            searchInput.value = e.target.textContent;
+            suggestions.style.display = 'none';
+
+            const searchEvent = new Event('input');
+            searchInput.dispatchEvent(searchEvent);
+        }
     });
 
     // Prevent context menu
