@@ -1,8 +1,7 @@
-
 document.addEventListener('DOMContentLoaded', () => {
     // Game sites data
     const gameSites = [
-        { title: 'NARKOBET', url: 'https://rebrand.ly/narko-bet', telegram: 'https://t.me/cs_hokirecehbot' },
+        { title: "NARKOBET", url: "https://rebrand.ly/narko-bet", telegram: "https://t.me/cs_hokirecehbot" },
         { title: 'PANDAWA88', url: 'https://rebrand.ly/pandawa88official', telegram: 'https://t.me/cs_hokirecehbot' },
         { title: 'TIRAI77', url: 'https://rebrand.ly/tirai77official', telegram: 'https://t.me/cs_hokirecehbot' },
         { title: 'TOKOHOKI78', url: 'https://rebrand.ly/tokohoki78', telegram: 'https://t.me/cs_hokirecehbot' },
@@ -90,9 +89,14 @@ document.addEventListener('DOMContentLoaded', () => {
                         <h3 class="game-title">${site.title}</h3>
                     </div>
                     <div class="game-body">
-                        <a href="${site.url}" target="_blank" rel="noopener noreferrer" class="login-button">
-                            <span>DAFTAR SEKARANG</span>
-                        </a>
+                        <div class="button-group">
+                            <a href="${site.url}" target="_blank" rel="noopener noreferrer" class="login-button">
+                                <span>DAFTAR</span>
+                            </a>
+                            <a href="${site.url}" target="_blank" rel="noopener noreferrer" class="login-button">
+                                <span>LOGIN</span>
+                            </a>
+                        </div>
                     </div>
                 </div>
             `;

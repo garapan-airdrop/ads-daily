@@ -1,3 +1,26 @@
+
+.button-group {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+}
+
+.login-button {
+    padding: 10px 20px;
+    background: linear-gradient(45deg, #ff6b6b, #ff8e8e);
+    border: none;
+    border-radius: 5px;
+    color: white;
+    font-weight: bold;
+    text-decoration: none;
+    transition: all 0.3s ease;
+}
+
+.login-button:hover {
+    transform: scale(1.05);
+    background: linear-gradient(45deg, #ff8e8e, #ff6b6b);
+}
+
 :root {
     --primary: #29b5a7;
     --secondary: #29ecee;
