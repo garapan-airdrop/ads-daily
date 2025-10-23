@@ -1,13 +1,30 @@
 {
-  "name": "my-project",
-  "private": true,
-  "version": "0.0.0",
+  "name": "telegram-multi-channel-bot",
+  "version": "1.0.0",
+  "description": "Multi-channel Telegram bot with scheduled posting",
+  "main": "index.js",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
-    "vite": "^5.4.8"
-  }
+    "dotenv": "^16.3.1",
+    "grammy": "^1.21.1",
+    "node-cron": "^3.0.3",
+    "node-fetch": "^3.3.2",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "scheduler",
+    "multi-channel",
+    "automation"
+  ],
+  "author": "Generated Code",
+  "license": "MIT"
 }
