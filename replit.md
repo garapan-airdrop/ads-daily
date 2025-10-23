@@ -10,6 +10,31 @@ The bot is built for promotional/marketing use cases where consistent daily cont
 
 Preferred communication style: Simple, everyday language.
 
+## Recent Changes
+
+### October 23, 2025 - Critical Bug Fixes
+
+**1. Config Persistence Bug Fixed**
+- **Issue**: Disabled channels were being removed from config file during save operations
+- **Solution**: Implemented dual-storage pattern with `this.channels` (active only) and `this.allChannels` (all channels)
+- **Impact**: Channel configurations are now preserved even when disabled, preventing data loss
+
+**2. Logger Initialization Error Fixed**
+- **Issue**: Logger failed at startup with ENOENT error when logs/ or history/ directories didn't exist
+- **Solution**: Added synchronous `ensureBasicDirectories()` method that creates required folders before logger initialization
+- **Impact**: Bot now starts reliably without manual directory creation
+
+**3. Async Initialization Race Condition Fixed**
+- **Issue**: Config loading and directory creation happened asynchronously in constructor, causing race conditions
+- **Solution**: Created async `init()` method for proper initialization sequencing, updated `main()` to await init before start
+- **Impact**: Eliminates timing-dependent startup failures, ensures clean separation of initialization and runtime phases
+
+**Technical Details:**
+- `loadConfig()` now populates both `this.channels` (enabled only) and `this.allChannels` (all channels)
+- `saveConfig()` saves from `this.allChannels` with synchronized state from `this.channels`
+- Config load logging now shows: "📋 Config loaded: X active, Y disabled, Z total channels"
+- Initialization flow: Constructor → `init()` (load config, create directories) → `start()` (connect, schedule, run)
+
 ## System Architecture
 
 ### Core Components
