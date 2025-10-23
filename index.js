@@ -1,5 +1,6 @@
 
 const fs = require('fs').promises;
+const fsSync = require('fs'); // For synchronous directory creation
 const path = require('path');
 const { Bot, InlineKeyboard, InputFile } = require('grammy');
 const cron = require('node-cron');
@@ -36,7 +37,8 @@ class TelegramMultiChannelBot {
             }
         });
         
-        this.channels = {};
+        this.channels = {}; // Active channels only (enabled !== false)
+        this.allChannels = {}; // All channels including disabled ones
         this.globalSettings = {};
         this.postingRules = {};
         this.isRunning = false;
@@ -45,9 +47,58 @@ class TelegramMultiChannelBot {
         this.pendingUploads = new Map();
         this.uploadTimeouts = new Map();
 
+        // Create essential directories before logger initialization to prevent ENOENT errors
+        this.ensureBasicDirectories();
+        
         this.setupLogger();
-        this.loadConfig();
         this.setupErrorHandler();
+        
+        // Flag to track initialization status
+        this.isInitialized = false;
+    }
+
+    async init() {
+        // Async initialization method - must be called and awaited before starting the bot
+        if (this.isInitialized) {
+            this.logger.warn('⚠️ Bot already initialized, skipping...');
+            return;
+        }
+
+        try {
+            this.logger.info('🔄 Initializing bot...');
+            
+            // Load configuration
+            await this.loadConfig();
+            
+            // Create all necessary directories
+            await this.createDirectories();
+            
+            // Validate channel access (optional, can be slow)
+            // await this.validateChannelAccess();
+            
+            this.isInitialized = true;
+            this.logger.info('✅ Bot initialization complete');
+        } catch (error) {
+            this.logger.error(`❌ Bot initialization failed: ${error.message}`);
+            throw error;
+        }
+    }
+
+    ensureBasicDirectories() {
+        // Create essential directories synchronously before logger initialization
+        // This prevents ENOENT errors when logger tries to write to log files
+        const basicDirs = ['logs', 'history', 'assets'];
+        
+        for (const dir of basicDirs) {
+            try {
+                if (!fsSync.existsSync(dir)) {
+                    fsSync.mkdirSync(dir, { recursive: true });
+                }
+            } catch (error) {
+                // If we can't create directories, log to console
+                console.error(`Failed to create directory ${dir}:`, error.message);
+            }
+        }
     }
 
     setupLogger() {
@@ -73,8 +124,15 @@ class TelegramMultiChannelBot {
             const configData = await fs.readFile('channels_config.json', 'utf8');
             const config = JSON.parse(configData);
 
+            // Store ALL channels (including disabled) for config persistence
+            this.allChannels = {};
             this.channels = {};
+            
             config.channels?.forEach(channel => {
+                // Save to allChannels regardless of enabled status
+                this.allChannels[channel.id] = channel;
+                
+                // Only save to channels if enabled
                 if (channel.enabled !== false) {
                     this.channels[channel.id] = channel;
                 }
@@ -86,7 +144,11 @@ class TelegramMultiChannelBot {
             // Auto-generate posting times if not set
             await this.autoGeneratePostingTimes();
 
-            this.logger.info(`📋 Config loaded for ${Object.keys(this.channels).length} active channels`);
+            const totalChannels = Object.keys(this.allChannels).length;
+            const activeChannels = Object.keys(this.channels).length;
+            const disabledChannels = totalChannels - activeChannels;
+            
+            this.logger.info(`📋 Config loaded: ${activeChannels} active, ${disabledChannels} disabled, ${totalChannels} total channels`);
         } catch (error) {
             this.logger.error(`❌ Error loading config: ${error.message}`);
             throw error;
@@ -147,8 +209,14 @@ class TelegramMultiChannelBot {
 
     async saveConfig() {
         try {
+            // Sync changes from this.channels back to this.allChannels
+            // This ensures any modifications to active channels are persisted
+            Object.keys(this.channels).forEach(channelId => {
+                this.allChannels[channelId] = this.channels[channelId];
+            });
+            
             const config = {
-                channels: Object.values(this.channels),
+                channels: Object.values(this.allChannels), // Save ALL channels, not just active ones
                 global_settings: this.globalSettings,
                 posting_rules: this.postingRules
             };
@@ -1278,6 +1346,12 @@ class TelegramMultiChannelBot {
 
     async start() {
         try {
+            // Ensure bot is initialized before starting
+            if (!this.isInitialized) {
+                this.logger.warn('⚠️ Bot not initialized yet. Initializing now...');
+                await this.init();
+            }
+            
             // Log network configuration
             this.logger.info('🌐 Network Configuration: IPv4-ONLY mode enabled');
             this.logger.info(`🌐 DNS Resolution Order: ${dns.getDefaultResultOrder()}`);
@@ -1327,7 +1401,7 @@ class TelegramMultiChannelBot {
                 }
             }
 
-            await this.createDirectories();
+            // Setup bot commands
             await this.setupBotCommands();
 
             this.logger.info('🚀 Starting Telegram Multi-Channel Bot...');
@@ -1445,6 +1519,11 @@ class TelegramMultiChannelBot {
 async function main() {
     try {
         const bot = new TelegramMultiChannelBot();
+        
+        // Initialize bot (load config, create directories, etc)
+        await bot.init();
+        
+        // Start bot (connect to Telegram, setup scheduler, etc)
         await bot.start();
 
         // Keep the process running
