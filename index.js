@@ -7,10 +7,6 @@ const cron = require('node-cron');
 const winston = require('winston');
 require('dotenv').config();
 
-// Force IPv4 DNS resolution globally
-const dns = require('dns');
-dns.setDefaultResultOrder('ipv4first');
-
 // Add fetch for Node.js versions that don't have it globally
 const fetch = globalThis.fetch || (() => {
     try {
@@ -22,17 +18,16 @@ const fetch = globalThis.fetch || (() => {
 
 class TelegramMultiChannelBot {
     constructor() {
-        // Force IPv4 environment configuration
-        process.env.NODE_OPTIONS = '--dns-result-order=ipv4first';
-        
-        // Create bot with custom configuration for better network handling
+        // Optimized bot configuration with better timeout handling
         this.bot = new Bot(process.env.TELEGRAM_BOT_TOKEN, {
             client: {
-                timeoutSeconds: 60, // Increase timeout to 60 seconds
+                timeoutSeconds: 60, // 60 detik - lebih toleran untuk koneksi lambat
                 canUseWebhookReply: false,
+                apiRoot: 'https://api.telegram.org',
                 baseFetchConfig: {
+                    // Tambahan config untuk fetch
                     compress: true,
-                    agent: undefined // Let Node.js handle agent with IPv4 preference
+                    agent: null // Gunakan default agent Node.js
                 }
             }
         });
@@ -46,6 +41,14 @@ class TelegramMultiChannelBot {
         this.postingLocks = new Set();
         this.pendingUploads = new Map();
         this.uploadTimeouts = new Map();
+        
+        // Rate limiting untuk 32 channels - lebih ringan
+        this.rateLimiter = {
+            lastRequest: 0,
+            minDelay: 500, // 500ms - lebih cepat tapi masih aman
+            requestQueue: [],
+            processing: false
+        };
 
         // Create essential directories before logger initialization to prevent ENOENT errors
         this.ensureBasicDirectories();
@@ -257,14 +260,57 @@ class TelegramMultiChannelBot {
     async validateChannelAccess() {
         for (const [channelId, channel] of Object.entries(this.channels)) {
             try {
-                await this.bot.api.getChat(channelId);
+                await this.rateLimitedRequest(() => this.bot.api.getChat(channelId));
                 this.logger.info(`✅ Channel access valid: ${channel.name} (${channelId})`);
-                // Add delay to prevent rate limiting (500ms between checks)
-                await new Promise(resolve => setTimeout(resolve, 500));
             } catch (error) {
                 this.logger.error(`❌ Cannot access channel ${channelId}: ${error.message}`);
             }
         }
+    }
+    
+    // Rate limiter untuk mencegah flood
+    async rateLimitedRequest(requestFn, maxRetries = 5) {
+        const executeRequest = async (retryCount = 0) => {
+            try {
+                // Tunggu minimal delay sejak request terakhir
+                const now = Date.now();
+                const timeSinceLastRequest = now - this.rateLimiter.lastRequest;
+                if (timeSinceLastRequest < this.rateLimiter.minDelay) {
+                    await new Promise(resolve => 
+                        setTimeout(resolve, this.rateLimiter.minDelay - timeSinceLastRequest)
+                    );
+                }
+                
+                this.rateLimiter.lastRequest = Date.now();
+                return await requestFn();
+                
+            } catch (error) {
+                // Retry untuk network errors
+                const isRetryable = 
+                    error.message?.includes('ETIMEDOUT') ||
+                    error.message?.includes('ECONNRESET') ||
+                    error.message?.includes('ENOTFOUND') ||
+                    error.message?.includes('EHOSTUNREACH') ||
+                    error.message?.includes('Network request') ||
+                    error.message?.includes('fetch failed') ||
+                    error.code === 'ETIMEDOUT' ||
+                    error.code === 'ECONNRESET' ||
+                    error.code === 'ENOTFOUND' ||
+                    error.code === 'EHOSTUNREACH';
+                
+                if (isRetryable && retryCount < maxRetries) {
+                    // Exponential backoff: 2s, 4s, 8s, 16s, 30s
+                    const backoffDelay = Math.min(2000 * Math.pow(2, retryCount), 30000);
+                    this.logger.warn(`⚠️ Request failed (${error.message}), retrying in ${backoffDelay/1000}s... (${retryCount + 1}/${maxRetries})`);
+                    await new Promise(resolve => setTimeout(resolve, backoffDelay));
+                    return executeRequest(retryCount + 1);
+                }
+                
+                throw error;
+            }
+        };
+        
+        return executeRequest();
     }
 
     async getMediaFiles(channelId) {
@@ -468,14 +514,23 @@ class TelegramMultiChannelBot {
 
             for (const messageId of messageIds) {
                 try {
-                    await this.bot.api.deleteMessage(channelId, messageId);
+                    await this.rateLimitedRequest(() => 
+                        this.bot.api.deleteMessage(channelId, messageId)
+                    );
                     this.logger.info(`✅ Deleted message ${messageId} from ${channelId}`);
                 } catch (error) {
-                    this.logger.warn(`⚠️ Could not delete message ${messageId}: ${error.message}`);
+                    // Message may be too old (>48h) or already deleted - still clear it from history
+                    if (error.message.includes('message to delete not found') || 
+                        error.message.includes("message can't be deleted")) {
+                        this.logger.debug(`🗑️ Message ${messageId} already gone from ${channelId}, clearing from history`);
+                    } else {
+                        this.logger.warn(`⚠️ Could not delete message ${messageId}: ${error.message}`);
+                    }
                 }
             }
 
-            // Clear message_ids after deletion
+            // Always clear message_ids after processing, regardless of deletion success
+            // This prevents accumulating stale message IDs that can't be deleted (>48h old)
             history.message_ids = [];
             await this.saveChannelHistory(channelId, history);
 
@@ -492,11 +547,19 @@ class TelegramMultiChannelBot {
 
         const channelConfig = this.channels[channelId];
 
+        // Define variables outside try block to ensure they're accessible in catch block
+        let mediaPath = null;
+        let mediaFilename = null;
+        let isVideo = false;
+
         try {
             // Delete old messages before sending new one
             await this.deleteOldMessages(channelId);
 
-            const { mediaPath, mediaFilename, isVideo } = await this.getNextMediaForChannel(channelId);
+            const mediaResult = await this.getNextMediaForChannel(channelId);
+            mediaPath = mediaResult.mediaPath;
+            mediaFilename = mediaResult.mediaFilename;
+            isVideo = mediaResult.isVideo;
 
             if (!mediaPath) {
                 this.logger.error(`❌ No media available for channel ${channelId}`);
@@ -536,20 +599,24 @@ class TelegramMultiChannelBot {
                 keyboard.url(channelConfig.button_text, channelConfig.button_url);
             }
 
-            // Send media based on type
+            // Send media based on type dengan rate limiting
             let sentMessage;
             if (isVideo) {
-                sentMessage = await this.bot.api.sendVideo(channelId, new InputFile(mediaPath), {
-                    caption: channelConfig.promo_text,
-                    parse_mode: this.postingRules.parse_mode || 'Markdown',
-                    reply_markup: keyboard
-                });
+                sentMessage = await this.rateLimitedRequest(() => 
+                    this.bot.api.sendVideo(channelId, new InputFile(mediaPath), {
+                        caption: channelConfig.promo_text,
+                        parse_mode: this.postingRules.parse_mode || 'Markdown',
+                        reply_markup: keyboard
+                    })
+                );
             } else {
-                sentMessage = await this.bot.api.sendPhoto(channelId, new InputFile(mediaPath), {
-                    caption: channelConfig.promo_text,
-                    parse_mode: this.postingRules.parse_mode || 'Markdown',
-                    reply_markup: keyboard
-                });
+                sentMessage = await this.rateLimitedRequest(() =>
+                    this.bot.api.sendPhoto(channelId, new InputFile(mediaPath), {
+                        caption: channelConfig.promo_text,
+                        parse_mode: this.postingRules.parse_mode || 'Markdown',
+                        reply_markup: keyboard
+                    })
+                );
             }
 
             // Save message_id for future deletion
@@ -572,10 +639,19 @@ class TelegramMultiChannelBot {
         } catch (error) {
             this.logger.error(`❌ Error sending media to ${channelId}: ${error.message}`);
 
-            // Mark problematic files as posted to avoid retry loop
-            if (error.message.includes('Request Entity Too Large') || 
+            // CHAT_RESTRICTED means the channel is restricted, not a file problem - don't mark file
+            if (error.message.includes('CHAT_RESTRICTED')) {
+                this.logger.warn(`⚠️ Channel ${channelId} is restricted - skipping channel, NOT marking file`);
+                return false;
+            }
+
+            // Mark problematic FILES as posted to avoid retry loop (only for actual file issues)
+            if (mediaFilename && (
+                error.message.includes('Request Entity Too Large') || 
                 error.message.includes('wrong remote file identifier') ||
-                error.message.includes('Bad Request')) {
+                error.message.includes('PHOTO_INVALID_DIMENSIONS') ||
+                error.message.includes('DOCUMENT_INVALID')
+            )) {
                 this.logger.warn(`⚠️ Skipping ${mediaFilename} due to file issue`);
 
                 const history = await this.loadChannelHistory(channelId);
@@ -591,6 +667,34 @@ class TelegramMultiChannelBot {
         }
     }
 
+    getDateInTimezone(date, timezone) {
+        // Convert a Date to a date string in the specified timezone
+        // Returns 'YYYY-MM-DD' string in the given timezone
+        try {
+            const options = { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' };
+            const parts = new Intl.DateTimeFormat('en-CA', options).formatToParts(date);
+            const year = parts.find(p => p.type === 'year').value;
+            const month = parts.find(p => p.type === 'month').value;
+            const day = parts.find(p => p.type === 'day').value;
+            return `${year}-${month}-${day}`;
+        } catch (e) {
+            // Fallback to UTC if timezone is invalid
+            return date.toISOString().split('T')[0];
+        }
+    }
+
+    getTimeInTimezone(date, timezone) {
+        // Get hour and minute in the specified timezone
+        try {
+            const options = { timeZone: timezone, hour: '2-digit', minute: '2-digit', hour12: false };
+            const timeStr = new Intl.DateTimeFormat('en-GB', options).format(date);
+            const [h, m] = timeStr.split(':').map(Number);
+            return { hour: h, minute: m };
+        } catch (e) {
+            return { hour: date.getUTCHours(), minute: date.getUTCMinutes() };
+        }
+    }
+
     shouldPost(channelId, currentTime, schedule) {
         try {
             // Validate posting_time format
@@ -599,30 +703,36 @@ class TelegramMultiChannelBot {
                 return false;
             }
 
-            const [hour, minute] = schedule.posting_time.split(':').map(Number);
+            const [targetHour, targetMinute] = schedule.posting_time.split(':').map(Number);
 
             // Validate hour and minute ranges
-            if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
-                this.logger.warn(`⚠️ Invalid time values for ${channelId}: ${hour}:${minute}`);
+            if (targetHour < 0 || targetHour > 23 || targetMinute < 0 || targetMinute > 59) {
+                this.logger.warn(`⚠️ Invalid time values for ${channelId}: ${targetHour}:${targetMinute}`);
                 return false;
             }
 
-            const postingTime = new Date(currentTime);
-            postingTime.setHours(hour, minute, 0, 0);
+            // Use channel's timezone to get current hour/minute (not server timezone)
+            const channelTimezone = schedule.timezone || 'Asia/Jakarta';
+            const { hour: currentHour, minute: currentMinute } = this.getTimeInTimezone(currentTime, channelTimezone);
 
-            // Check if current time is past posting time today
-            if (currentTime < postingTime) {
+            // Check if current time (in channel timezone) is past posting time
+            const currentTotalMinutes = currentHour * 60 + currentMinute;
+            const targetTotalMinutes = targetHour * 60 + targetMinute;
+
+            if (currentTotalMinutes < targetTotalMinutes) {
                 return false;
             }
 
-            // Check if already posted today (with timezone consideration)
-            const today = currentTime.toDateString();
-            const lastRun = schedule.last_run ? new Date(schedule.last_run).toDateString() : null;
+            // Compare dates in channel's timezone (not server's UTC)
+            const todayInChannelTz = this.getDateInTimezone(currentTime, channelTimezone);
+            const lastRunInChannelTz = schedule.last_run 
+                ? this.getDateInTimezone(new Date(schedule.last_run), channelTimezone)
+                : null;
 
-            const shouldPost = lastRun !== today;
+            const shouldPost = lastRunInChannelTz !== todayInChannelTz;
 
             if (shouldPost) {
-                this.logger.debug(`📅 Should post to ${channelId}: current=${currentTime.toLocaleTimeString()}, scheduled=${schedule.posting_time}, lastRun=${lastRun}`);
+                this.logger.debug(`📅 Should post to ${channelId}: current=${currentHour}:${String(currentMinute).padStart(2,'0')} ${channelTimezone}, scheduled=${schedule.posting_time}, todayTz=${todayInChannelTz}, lastRunTz=${lastRunInChannelTz}`);
             }
 
             return shouldPost;
@@ -648,7 +758,8 @@ class TelegramMultiChannelBot {
             try {
                 const schedule = {
                     posting_time: channelConfig.posting_time,
-                    last_run: channelConfig.last_run || null
+                    last_run: channelConfig.last_run || null,
+                    timezone: channelConfig.timezone || 'Asia/Jakarta'
                 };
 
                 if (this.shouldPost(channelId, currentTime, schedule)) {
@@ -674,8 +785,8 @@ class TelegramMultiChannelBot {
                         this.postingLocks.delete(channelId);
                     }
 
-                    // Delay between channels to prevent rate limiting
-                    await new Promise(resolve => setTimeout(resolve, 3000));
+                    // Delay between channels - cukup 1 detik karena sudah ada rate limiter
+                    await new Promise(resolve => setTimeout(resolve, 1000));
                 }
             } catch (error) {
                 this.postingLocks.delete(channelId); // Ensure unlock on error
@@ -1352,51 +1463,27 @@ class TelegramMultiChannelBot {
                 await this.init();
             }
             
-            // Log network configuration
-            this.logger.info('🌐 Network Configuration: IPv4-ONLY mode enabled');
-            this.logger.info(`🌐 DNS Resolution Order: ${dns.getDefaultResultOrder()}`);
-
-            // Validate bot token with retry mechanism
+            // Improved retry logic dengan exponential backoff
             let authenticated = false;
             let retryCount = 0;
-            const maxRetries = 10;
+            const maxRetries = 3; // 3 retry cukup untuk initial connection
             
             while (!authenticated && retryCount < maxRetries) {
                 try {
-                    this.logger.info(`🔄 Attempting to connect to Telegram API... (Attempt ${retryCount + 1}/${maxRetries})`);
-                    
-                    // Test DNS resolution first
-                    if (retryCount === 0) {
-                        try {
-                            const dns = require('dns').promises;
-                            const addresses = await dns.resolve4('api.telegram.org');
-                            this.logger.info(`✅ DNS Resolution successful: ${addresses[0]}`);
-                        } catch (dnsError) {
-                            this.logger.warn(`⚠️ DNS Resolution warning: ${dnsError.message}`);
-                        }
-                    }
-                    
-                    const me = await this.bot.api.getMe();
-                    this.logger.info(`🤖 Bot authenticated: ${me.first_name} (@${me.username})`);
+                    this.logger.info(`🔄 Connecting to Telegram... (${retryCount + 1}/${maxRetries})`);
+                    const me = await this.rateLimitedRequest(() => this.bot.api.getMe());
+                    this.logger.info(`✅ Bot connected: ${me.first_name} (@${me.username})`);
                     authenticated = true;
                 } catch (error) {
                     retryCount++;
-                    this.logger.warn(`⚠️ Connection attempt ${retryCount} failed: ${error.message}`);
-                    
                     if (retryCount < maxRetries) {
-                        // Progressive backoff: 2s, 4s, 8s, 15s, 30s, then 60s
-                        const delays = [2000, 4000, 8000, 15000, 30000, 60000, 60000, 60000, 60000, 60000];
-                        const waitTime = delays[Math.min(retryCount - 1, delays.length - 1)];
-                        this.logger.info(`⏳ Retrying in ${waitTime/1000} seconds...`);
+                        const waitTime = Math.min(3000 * Math.pow(2, retryCount), 30000); // 3s, 6s, 12s
+                        this.logger.warn(`⚠️ Connection failed (${error.message}), waiting ${waitTime/1000}s...`);
                         await new Promise(resolve => setTimeout(resolve, waitTime));
                     } else {
-                        this.logger.error(`❌ Bot token validation failed after ${maxRetries} attempts`);
-                        this.logger.error(`💡 Troubleshooting:`);
-                        this.logger.error(`   1. Check internet connectivity: ping 8.8.8.8`);
-                        this.logger.error(`   2. Check DNS: nslookup api.telegram.org`);
-                        this.logger.error(`   3. Verify bot token in .env file`);
-                        this.logger.error(`   4. Check Telegram API status: https://status.telegram.org`);
-                        throw new Error('Unable to connect to Telegram API after multiple attempts');
+                        this.logger.error(`❌ Cannot connect after ${maxRetries} attempts`);
+                        this.logger.error(`💡 Check: internet connection, bot token, firewall`);
+                        throw error;
                     }
                 }
             }
@@ -1416,9 +1503,15 @@ class TelegramMultiChannelBot {
             this.scheduledTasks.get('cleanup').start();
             this.scheduledTasks.get('memory-cleanup').start();
 
-            // Start bot polling for commands
-            this.bot.start();
+            // Setup error handler for network issues
+            this.setupBotErrorHandler();
+
+            // Start bot polling for commands (non-blocking)
+            this.startBotPolling();
             this.isRunning = true;
+
+            // Setup connection health monitoring
+            this.setupConnectionMonitoring();
 
             this.logger.info('✅ Bot started successfully');
             this.printScheduleSummary();
@@ -1433,8 +1526,101 @@ class TelegramMultiChannelBot {
         }
     }
 
+    setupBotErrorHandler() {
+        // Handle errors from bot polling and API calls
+        this.bot.catch((err) => {
+            const error = err.error || err;
+            
+            // Check if it's a network-related error
+            const isNetworkError = 
+                error.message?.includes('Network request') ||
+                error.message?.includes('ECONNRESET') ||
+                error.message?.includes('ETIMEDOUT') ||
+                error.message?.includes('ENOTFOUND') ||
+                error.message?.includes('fetch failed') ||
+                error.code === 'ECONNRESET' ||
+                error.code === 'ETIMEDOUT' ||
+                error.code === 'ENOTFOUND';
+
+            if (isNetworkError) {
+                this.logger.warn(`⚠️ Network error detected: ${error.message}`);
+                this.logger.info(`🔄 Bot will continue running and retry automatically...`);
+                // Don't throw - let it retry automatically
+            } else {
+                this.logger.error(`❌ Bot error: ${error.message}`);
+                if (error.stack) {
+                    this.logger.error(`Stack trace: ${error.stack}`);
+                }
+            }
+        });
+    }
+
+    startBotPolling() {
+        // Start bot polling (non-blocking, runs in background)
+        this.logger.info('🔄 Starting bot polling...');
+        
+        // bot.start() is a long-running task that polls for updates
+        // It should not be awaited as it runs indefinitely
+        this.bot.start({
+            onStart: () => {
+                this.logger.info('📡 Bot polling started successfully');
+            }
+        });
+    }
+
+    setupConnectionMonitoring() {
+        // Monitor connection health every 10 minutes - kurangi beban
+        const healthCheckInterval = setInterval(async () => {
+            try {
+                // Health check dengan rate limiting
+                await this.rateLimitedRequest(() => this.bot.api.getMe());
+                this.logger.debug('✅ Connection health check passed');
+                
+                // Reset consecutive failures counter
+                if (!this.consecutiveFailures) this.consecutiveFailures = 0;
+                this.consecutiveFailures = 0;
+                
+            } catch (error) {
+                this.logger.warn(`⚠️ Connection health check failed: ${error.message}`);
+                
+                // Track consecutive failures
+                if (!this.consecutiveFailures) this.consecutiveFailures = 0;
+                this.consecutiveFailures++;
+                
+                if (this.consecutiveFailures >= 2) {
+                    this.logger.error(`❌ Multiple consecutive health check failures (${this.consecutiveFailures})`);
+                    this.logger.info('🔄 Attempting to reconnect bot...');
+                    
+                    // Try to reconnect dengan retry
+                    try {
+                        await this.rateLimitedRequest(() => this.bot.api.getMe());
+                        this.logger.info('✅ Reconnection successful');
+                        this.consecutiveFailures = 0;
+                    } catch (reconnectError) {
+                        this.logger.error(`❌ Reconnection failed: ${reconnectError.message}`);
+                        this.logger.warn('⚠️ Bot may have connectivity issues. Will retry automatically.');
+                    }
+                } else {
+                    this.logger.info('🔄 Bot will automatically retry on next request...');
+                }
+            }
+        }, 10 * 60 * 1000); // Every 10 minutes - kurangi frequency
+
+        // Store interval for cleanup
+        this.healthCheckInterval = healthCheckInterval;
+
+        this.logger.info('🏥 Connection health monitoring enabled (check every 10 minutes)');
+        this.logger.info('⚡ Rate limiting: 500ms minimum delay between requests');
+        this.logger.info('🔄 Auto-retry: Max 5 retries with exponential backoff (up to 30s)');
+    }
+
     async stop() {
         this.logger.info('🛑 Stopping bot...');
+
+        // Clear health check interval
+        if (this.healthCheckInterval) {
+            clearInterval(this.healthCheckInterval);
+        }
 
         // Clear all scheduled tasks
         this.scheduledTasks.forEach(task => task.stop());
