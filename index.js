@@ -655,8 +655,8 @@ class TelegramMultiChannelBot {
 
             // CHAT_RESTRICTED means the channel is restricted, not a file problem - don't mark file
             if (error.message.includes('CHAT_RESTRICTED')) {
-                this.logger.warn(`⚠️ Channel ${channelId} is restricted - skipping channel, NOT marking file`);
-                return false;
+                this.logger.warn(`⚠️ Channel ${channelId} is restricted - skipping for today to prevent retry loop`);
+                return 'restricted';
             }
 
             // Mark problematic FILES as posted to avoid retry loop (only for actual file issues)
@@ -783,12 +783,17 @@ class TelegramMultiChannelBot {
                     this.logger.info(`⏰ Posting time for ${channelConfig.name} (${channelId})`);
 
                     try {
-                        const success = await this.sendMediaToChannel(channelId);
+                        const result = await this.sendMediaToChannel(channelId);
 
-                        if (success) {
+                        if (result === true) {
                             channelConfig.last_run = currentTime.toISOString();
-                            await this.saveConfig(); // Save immediately to prevent duplicates
+                            await this.saveConfig();
                             this.logger.info(`✅ Posting successful for ${channelConfig.name}`);
+                        } else if (result === 'restricted') {
+                            // Channel restricted — update last_run to prevent retrying every minute today
+                            channelConfig.last_run = currentTime.toISOString();
+                            await this.saveConfig();
+                            this.logger.warn(`⏭️ Skipped ${channelConfig.name} today (channel restricted)`);
                         } else {
                             this.logger.error(`❌ Posting failed for ${channelConfig.name}`);
                         }
