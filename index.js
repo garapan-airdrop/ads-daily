@@ -285,6 +285,20 @@ class TelegramMultiChannelBot {
                 return await requestFn();
                 
             } catch (error) {
+                // Deteksi error 429 Too Many Requests dari Telegram
+                const is429 = error.message?.includes('429') || 
+                              error.message?.includes('Too Many Requests');
+                
+                if (is429 && retryCount < maxRetries) {
+                    // Ambil waktu retry-after dari pesan error Telegram
+                    const retryAfterMatch = error.message?.match(/retry after (\d+)/i);
+                    const retryAfterSec = retryAfterMatch ? parseInt(retryAfterMatch[1]) : 20;
+                    const waitMs = (retryAfterSec + 2) * 1000; // tambah buffer 2 detik
+                    this.logger.warn(`⚠️ Rate limited by Telegram (429), waiting ${retryAfterSec + 2}s before retry... (${retryCount + 1}/${maxRetries})`);
+                    await new Promise(resolve => setTimeout(resolve, waitMs));
+                    return executeRequest(retryCount + 1);
+                }
+
                 // Retry untuk network errors
                 const isRetryable = 
                     error.message?.includes('ETIMEDOUT') ||
