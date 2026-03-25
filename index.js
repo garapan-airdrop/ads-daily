@@ -643,8 +643,9 @@ class TelegramMultiChannelBot {
                 history.posted_media = postedMedia;
             }
 
-            // Store the new message_id
-            history.message_ids = [sentMessage.message_id];
+            // Accumulate message_ids so all sent messages can be deleted later
+            if (!Array.isArray(history.message_ids)) history.message_ids = [];
+            history.message_ids.push(sentMessage.message_id);
             history.last_posted = new Date().toISOString();
             await this.saveChannelHistory(channelId, history);
 
@@ -1170,30 +1171,45 @@ class TelegramMultiChannelBot {
         await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
     }
 
-    async showStatusMenu(ctx) {
+    async showStatusMenu(ctx, page = 0) {
         const status = this.isRunning ? '🟢 RUNNING' : '🔴 STOPPED';
-        const activeChannels = Object.values(this.channels).filter(c => c.enabled).length;
-        const totalChannels = Object.keys(this.channels).length;
+        const allActive = Object.values(this.channels).filter(c => c.enabled && c.posting_time);
+        const activeCount = allActive.length;
+        const totalCount = Object.keys(this.channels).length;
         const uptime = process.uptime();
         const hours = Math.floor(uptime / 3600);
         const minutes = Math.floor((uptime % 3600) / 60);
 
+        const itemsPerPage = 12;
+        const totalPages = Math.ceil(allActive.length / itemsPerPage);
+        if (page < 0) page = 0;
+        if (page >= totalPages) page = totalPages - 1;
+
+        const pageChannels = allActive.slice(page * itemsPerPage, (page + 1) * itemsPerPage);
+
         let text =
             `📊 *STATUS BOT*\n\n` +
             `🤖 Status: ${status}\n` +
-            `📡 Channel: *${activeChannels}/${totalChannels}* aktif\n` +
-            `⏱️ Uptime: ${hours}j ${minutes}m\n\n`;
+            `📡 Channel: *${activeCount}/${totalCount}* aktif\n` +
+            `⏱️ Uptime: *${hours}j ${minutes}m*\n\n` +
+            `⏰ *Jadwal Posting (${page + 1}/${totalPages}):*\n`;
 
-        text += `⏰ *Jadwal Posting:*\n`;
-        const channels = Object.values(this.channels).filter(c => c.enabled && c.posting_time).slice(0, 8);
-        for (const ch of channels) {
-            text += `• ${ch.name}: ${ch.posting_time}\n`;
+        for (const ch of pageChannels) {
+            const lastRun = ch.last_run
+                ? new Date(ch.last_run).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+                : 'belum';
+            text += `• *${ch.name}*: ${ch.posting_time} _(${lastRun})_\n`;
         }
-        if (activeChannels > 8) text += `_...dan ${activeChannels - 8} channel lainnya_`;
 
-        const keyboard = new InlineKeyboard()
-            .text('🔄 Refresh', 'menu_status').row()
-            .text('◀️ Menu Utama', 'menu_main');
+        const keyboard = new InlineKeyboard();
+        if (totalPages > 1) {
+            if (page > 0) keyboard.text('◀️ Prev', `menu_status_p_${page - 1}`);
+            keyboard.text(`${page + 1}/${totalPages}`, 'noop');
+            if (page < totalPages - 1) keyboard.text('Next ▶️', `menu_status_p_${page + 1}`);
+            keyboard.row();
+        }
+        keyboard.text('🔄 Refresh', `menu_status_p_${page}`).row();
+        keyboard.text('◀️ Menu Utama', 'menu_main');
 
         await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
     }
@@ -1233,12 +1249,15 @@ class TelegramMultiChannelBot {
 
         const text =
             `🗑️ *MENU HAPUS PESAN*\n\n` +
-            `Akan menghapus semua pesan lama dari *${totalChannels}* channel.\n\n` +
-            `⚠️ Pesan yang ID-nya tersimpan di history akan dihapus dari Telegram.\n\n` +
+            `Channel aktif: *${totalChannels}*\n\n` +
+            `ℹ️ *Catatan penting:*\n` +
+            `Bot Telegram hanya bisa menghapus pesan yang _ID-nya tersimpan di history_. ` +
+            `Pesan lama yang dikirim sebelum sistem tracking aktif tidak bisa dihapus secara otomatis — itu keterbatasan API Telegram.\n\n` +
+            `Mulai sekarang, semua ID pesan diakumulasi sehingga penghapusan makin bersih ke depannya.\n\n` +
             `Pilih aksi:`;
 
         const keyboard = new InlineKeyboard()
-            .text('🗑️ Hapus Semua Pesan Lama', 'menu_deleteall_ask').row()
+            .text('🗑️ Hapus Semua Pesan Tertracking', 'menu_deleteall_ask').row()
             .text('◀️ Menu Utama', 'menu_main');
 
         await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
@@ -1655,7 +1674,11 @@ class TelegramMultiChannelBot {
                     await this.showFolderListMenu(ctx, page);
 
                 } else if (data === 'menu_status') {
-                    await this.showStatusMenu(ctx);
+                    await this.showStatusMenu(ctx, 0);
+
+                } else if (data.startsWith('menu_status_p_')) {
+                    const page = parseInt(data.replace('menu_status_p_', ''));
+                    await this.showStatusMenu(ctx, page);
 
                 } else if (data === 'menu_control') {
                     await this.showControlMenu(ctx);
