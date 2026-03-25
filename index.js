@@ -1073,6 +1073,178 @@ class TelegramMultiChannelBot {
         }
     }
 
+    // =============================================
+    // MENU SYSTEM
+    // =============================================
+
+    async showMainMenu(ctx, edit = false) {
+        const status = this.isRunning ? '🟢 Running' : '🔴 Stopped';
+        const activeChannels = Object.values(this.channels).filter(c => c.enabled).length;
+
+        const text =
+            `🤖 *TELEGRAM BOT MANAGER*\n\n` +
+            `📊 Status: ${status}\n` +
+            `📡 Channel Aktif: *${activeChannels}*\n\n` +
+            `Pilih menu di bawah ini:`;
+
+        const keyboard = new InlineKeyboard()
+            .text('📋 Daftar Channel', 'menu_channels').text('📁 Folder', 'menu_folders').row()
+            .text('📊 Status Bot', 'menu_status').text('⚙️ Kontrol', 'menu_control').row()
+            .text('📤 Posting', 'menu_posting').text('🗑️ Hapus Pesan', 'menu_delete');
+
+        const opts = { parse_mode: 'Markdown', reply_markup: keyboard };
+        if (edit) {
+            await ctx.editMessageText(text, opts);
+        } else {
+            await ctx.reply(text, opts);
+        }
+    }
+
+    async showChannelListMenu(ctx, page = 0) {
+        const allChannels = Object.entries(this.channels);
+        const itemsPerPage = 10;
+        const totalPages = Math.ceil(allChannels.length / itemsPerPage);
+
+        if (page < 0) page = 0;
+        if (page >= totalPages) page = totalPages - 1;
+
+        const start = page * itemsPerPage;
+        const end = Math.min(start + itemsPerPage, allChannels.length);
+        const pageChannels = allChannels.slice(start, end);
+
+        let text = `📋 *DAFTAR CHANNEL* (${page + 1}/${totalPages})\n\n`;
+
+        for (const [channelId, config] of pageChannels) {
+            const lastRun = config.last_run
+                ? new Date(config.last_run).toLocaleString('id-ID', {
+                    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
+                  })
+                : 'Belum pernah';
+            text += `🟢 *${config.name}*\n`;
+            text += `   ⏰ ${config.posting_time} WIB  •  📤 ${lastRun}\n\n`;
+        }
+
+        const keyboard = new InlineKeyboard();
+        if (totalPages > 1) {
+            if (page > 0) keyboard.text('◀️ Prev', `menu_channels_p_${page - 1}`);
+            keyboard.text(`${page + 1}/${totalPages}`, 'noop');
+            if (page < totalPages - 1) keyboard.text('Next ▶️', `menu_channels_p_${page + 1}`);
+            keyboard.row();
+        }
+        keyboard.text('◀️ Menu Utama', 'menu_main');
+
+        await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+    }
+
+    async showFolderListMenu(ctx, page = 0) {
+        const allChannels = Object.entries(this.channels);
+        const itemsPerPage = 12;
+        const totalPages = Math.ceil(allChannels.length / itemsPerPage);
+
+        if (page < 0) page = 0;
+        if (page >= totalPages) page = totalPages - 1;
+
+        const start = page * itemsPerPage;
+        const end = Math.min(start + itemsPerPage, allChannels.length);
+        const pageChannels = allChannels.slice(start, end);
+
+        let text = `📁 *FOLDER CHANNEL* (${page + 1}/${totalPages})\n\n`;
+
+        for (const [channelId, config] of pageChannels) {
+            const folder = config.image_folder || 'assets/promo';
+            text += `• *${config.name}*\n  \`${folder}\`\n\n`;
+        }
+
+        const keyboard = new InlineKeyboard();
+        if (totalPages > 1) {
+            if (page > 0) keyboard.text('◀️ Prev', `menu_folders_p_${page - 1}`);
+            keyboard.text(`${page + 1}/${totalPages}`, 'noop');
+            if (page < totalPages - 1) keyboard.text('Next ▶️', `menu_folders_p_${page + 1}`);
+            keyboard.row();
+        }
+        keyboard.text('◀️ Menu Utama', 'menu_main');
+
+        await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+    }
+
+    async showStatusMenu(ctx) {
+        const status = this.isRunning ? '🟢 RUNNING' : '🔴 STOPPED';
+        const activeChannels = Object.values(this.channels).filter(c => c.enabled).length;
+        const totalChannels = Object.keys(this.channels).length;
+        const uptime = process.uptime();
+        const hours = Math.floor(uptime / 3600);
+        const minutes = Math.floor((uptime % 3600) / 60);
+
+        let text =
+            `📊 *STATUS BOT*\n\n` +
+            `🤖 Status: ${status}\n` +
+            `📡 Channel: *${activeChannels}/${totalChannels}* aktif\n` +
+            `⏱️ Uptime: ${hours}j ${minutes}m\n\n`;
+
+        text += `⏰ *Jadwal Posting:*\n`;
+        const channels = Object.values(this.channels).filter(c => c.enabled && c.posting_time).slice(0, 8);
+        for (const ch of channels) {
+            text += `• ${ch.name}: ${ch.posting_time}\n`;
+        }
+        if (activeChannels > 8) text += `_...dan ${activeChannels - 8} channel lainnya_`;
+
+        const keyboard = new InlineKeyboard()
+            .text('🔄 Refresh', 'menu_status').row()
+            .text('◀️ Menu Utama', 'menu_main');
+
+        await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+    }
+
+    async showControlMenu(ctx) {
+        const status = this.isRunning ? '🟢 Running' : '🔴 Stopped';
+
+        const text =
+            `⚙️ *KONTROL BOT*\n\n` +
+            `Status saat ini: ${status}\n\n` +
+            `Pilih aksi:`;
+
+        const keyboard = new InlineKeyboard()
+            .text('▶️ Start Scheduler', 'menu_ctrl_start').text('⏹️ Stop Scheduler', 'menu_ctrl_stop').row()
+            .text('◀️ Menu Utama', 'menu_main');
+
+        await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+    }
+
+    async showPostingMenu(ctx) {
+        const totalChannels = Object.values(this.channels).filter(c => c.enabled).length;
+
+        const text =
+            `📤 *MENU POSTING*\n\n` +
+            `Total channel aktif: *${totalChannels}*\n\n` +
+            `Pilih aksi:`;
+
+        const keyboard = new InlineKeyboard()
+            .text('🚀 Post ke Semua Channel', 'menu_postall_ask').row()
+            .text('◀️ Menu Utama', 'menu_main');
+
+        await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+    }
+
+    async showDeleteMenu(ctx) {
+        const totalChannels = Object.values(this.channels).filter(c => c.enabled).length;
+
+        const text =
+            `🗑️ *MENU HAPUS PESAN*\n\n` +
+            `Akan menghapus semua pesan lama dari *${totalChannels}* channel.\n\n` +
+            `⚠️ Pesan yang ID-nya tersimpan di history akan dihapus dari Telegram.\n\n` +
+            `Pilih aksi:`;
+
+        const keyboard = new InlineKeyboard()
+            .text('🗑️ Hapus Semua Pesan Lama', 'menu_deleteall_ask').row()
+            .text('◀️ Menu Utama', 'menu_main');
+
+        await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+    }
+
+    // =============================================
+    // END MENU SYSTEM
+    // =============================================
+
     setupBotCommands() {
         // Handle text messages for commands
         this.bot.on('message:text', async (ctx) => {
@@ -1090,7 +1262,9 @@ class TelegramMultiChannelBot {
             }
 
             try {
-                if (text.startsWith('!add ')) {
+                if (text === '/start' || text === '/menu' || text === '!menu') {
+                    await this.showMainMenu(ctx, false);
+                } else if (text.startsWith('!add ')) {
                     const folderName = text.substring(5).trim();
                     if (folderName) {
                         // Store the folder name for next media upload
@@ -1298,22 +1472,143 @@ class TelegramMultiChannelBot {
             }
 
             try {
-                if (data.startsWith('channels_page_')) {
+                await ctx.answerCallbackQuery();
+
+                // ─── MENU SYSTEM CALLBACKS ───────────────────────────────
+
+                if (data === 'menu_main') {
+                    await this.showMainMenu(ctx, true);
+
+                } else if (data === 'menu_channels') {
+                    await this.showChannelListMenu(ctx, 0);
+
+                } else if (data.startsWith('menu_channels_p_')) {
+                    const page = parseInt(data.replace('menu_channels_p_', ''));
+                    await this.showChannelListMenu(ctx, page);
+
+                } else if (data === 'menu_folders') {
+                    await this.showFolderListMenu(ctx, 0);
+
+                } else if (data.startsWith('menu_folders_p_')) {
+                    const page = parseInt(data.replace('menu_folders_p_', ''));
+                    await this.showFolderListMenu(ctx, page);
+
+                } else if (data === 'menu_status') {
+                    await this.showStatusMenu(ctx);
+
+                } else if (data === 'menu_control') {
+                    await this.showControlMenu(ctx);
+
+                } else if (data === 'menu_ctrl_start') {
+                    if (!this.isRunning) {
+                        this.setupScheduler();
+                        this.scheduledTasks.get('main').start();
+                        this.scheduledTasks.get('cleanup').start();
+                        this.scheduledTasks.get('memory-cleanup').start();
+                        this.isRunning = true;
+                        this.logger.info(`🚀 Bot scheduler started via menu by admin ${userId}`);
+                    }
+                    await this.showControlMenu(ctx);
+
+                } else if (data === 'menu_ctrl_stop') {
+                    if (this.isRunning) {
+                        this.scheduledTasks.forEach(task => task.stop());
+                        this.isRunning = false;
+                        this.logger.info(`🛑 Bot scheduler stopped via menu by admin ${userId}`);
+                    }
+                    await this.showControlMenu(ctx);
+
+                } else if (data === 'menu_posting') {
+                    await this.showPostingMenu(ctx);
+
+                } else if (data === 'menu_postall_ask') {
+                    const totalChannels = Object.values(this.channels).filter(c => c.enabled).length;
+                    const keyboard = new InlineKeyboard()
+                        .text(`✅ Ya, Post ke ${totalChannels} Channel`, 'menu_postall_run').row()
+                        .text('❌ Batal', 'menu_posting');
+                    await ctx.editMessageText(
+                        `📤 *KONFIRMASI POSTING*\n\n` +
+                        `Yakin ingin post ke semua *${totalChannels}* channel sekarang?`,
+                        { parse_mode: 'Markdown', reply_markup: keyboard }
+                    );
+
+                } else if (data === 'menu_postall_run') {
+                    const keyboard = new InlineKeyboard().text('⏳ Sedang memproses...', 'noop');
+                    await ctx.editMessageText(
+                        `🚀 *POSTING BERJALAN...*\n\nMohon tunggu, sedang posting ke semua channel.`,
+                        { parse_mode: 'Markdown', reply_markup: keyboard }
+                    );
+                    const results = await this.forcePostAll();
+                    const successCount = Object.values(results).filter(Boolean).length;
+                    const totalCount = Object.keys(results).length;
+                    const keyboard2 = new InlineKeyboard()
+                        .text('◀️ Menu Posting', 'menu_posting').text('🏠 Menu Utama', 'menu_main');
+                    await ctx.editMessageText(
+                        `✅ *POSTING SELESAI*\n\n` +
+                        `Berhasil: *${successCount}/${totalCount}* channel`,
+                        { parse_mode: 'Markdown', reply_markup: keyboard2 }
+                    );
+
+                } else if (data === 'menu_delete') {
+                    await this.showDeleteMenu(ctx);
+
+                } else if (data === 'menu_deleteall_ask') {
+                    const totalChannels = Object.values(this.channels).filter(c => c.enabled).length;
+                    const keyboard = new InlineKeyboard()
+                        .text(`✅ Ya, Hapus Semua Pesan`, 'menu_deleteall_run').row()
+                        .text('❌ Batal', 'menu_delete');
+                    await ctx.editMessageText(
+                        `🗑️ *KONFIRMASI HAPUS*\n\n` +
+                        `Yakin ingin hapus semua pesan lama dari *${totalChannels}* channel?\n\n` +
+                        `⚠️ Pesan yang ada di Telegram akan dihapus permanen.`,
+                        { parse_mode: 'Markdown', reply_markup: keyboard }
+                    );
+
+                } else if (data === 'menu_deleteall_run') {
+                    const keyboard = new InlineKeyboard().text('⏳ Sedang menghapus...', 'noop');
+                    await ctx.editMessageText(
+                        `🗑️ *MENGHAPUS PESAN...*\n\nMohon tunggu, sedang menghapus pesan dari semua channel.`,
+                        { parse_mode: 'Markdown', reply_markup: keyboard }
+                    );
+                    let deletedCount = 0;
+                    let totalDeleted = 0;
+                    for (const channelId of Object.keys(this.channels)) {
+                        if (this.channels[channelId].enabled) {
+                            const before = (await this.loadChannelHistory(channelId)).message_ids?.length || 0;
+                            await this.deleteOldMessages(channelId);
+                            totalDeleted += before;
+                            deletedCount++;
+                            await new Promise(resolve => setTimeout(resolve, 300));
+                        }
+                    }
+                    const keyboard2 = new InlineKeyboard()
+                        .text('◀️ Menu Hapus', 'menu_delete').text('🏠 Menu Utama', 'menu_main');
+                    await ctx.editMessageText(
+                        `✅ *HAPUS SELESAI*\n\n` +
+                        `Selesai memproses *${deletedCount}* channel.\n` +
+                        `Total pesan dihapus: *${totalDeleted}*`,
+                        { parse_mode: 'Markdown', reply_markup: keyboard2 }
+                    );
+
+                // ─── LEGACY PAGINATION CALLBACKS ─────────────────────────
+
+                } else if (data.startsWith('channels_page_')) {
                     const page = parseInt(data.replace('channels_page_', ''));
-                    await ctx.answerCallbackQuery();
                     await ctx.deleteMessage();
                     await this.sendChannelListPaginated(ctx, page);
                 } else if (data.startsWith('folders_page_')) {
                     const page = parseInt(data.replace('folders_page_', ''));
-                    await ctx.answerCallbackQuery();
                     await ctx.deleteMessage();
                     await this.sendFolderListPaginated(ctx, page);
                 } else if (data === 'noop') {
-                    await ctx.answerCallbackQuery();
+                    // do nothing
                 }
+
             } catch (error) {
                 this.logger.error(`❌ Error handling callback query: ${error.message}`);
-                await ctx.answerCallbackQuery('❌ Error processing request');
+                try {
+                    await ctx.answerCallbackQuery('❌ Error: ' + error.message.substring(0, 50));
+                } catch (_) {}
             }
         });
 

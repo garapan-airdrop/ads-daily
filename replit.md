@@ -12,6 +12,29 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+### March 25, 2026 - Interactive Menu System
+
+**Full Interactive Menu via Inline Buttons**
+- Kirim `/start`, `/menu`, atau `!menu` untuk membuka Main Menu dengan tombol
+- **Menu Utama** memiliki 6 tombol: Daftar Channel, Folder, Status Bot, Kontrol, Posting, Hapus Pesan
+- Semua navigasi menggunakan edit pesan (tidak spam pesan baru)
+- Setiap submenu memiliki tombol **◀️ Menu Utama** untuk kembali
+- Semua command lama (`!list`, `!post`, `!deleteall`, dll.) tetap berfungsi
+
+**Detail Submenu:**
+- 📋 **Daftar Channel** — Daftar 30 channel dengan jadwal & last post, paginated 10/halaman
+- 📁 **Folder** — Daftar folder image per channel, paginated 12/halaman
+- 📊 **Status Bot** — Status running/stopped, uptime, jadwal 8 channel pertama, tombol Refresh
+- ⚙️ **Kontrol** — Tombol Start/Stop scheduler langsung dari menu
+- 📤 **Posting** — Post ke semua channel dengan konfirmasi dua langkah
+- 🗑️ **Hapus Pesan** — Hapus semua pesan lama dari semua channel dengan konfirmasi
+
+**Hapus Pesan Bersih:**
+- Konfirmasi dua langkah sebelum hapus
+- Menghitung total pesan yang akan dihapus sebelum proses
+- Laporan hasil: berapa channel diproses & total pesan terhapus
+- Delay 300ms antar channel untuk hindari rate limit
+
 ### October 23, 2025 - Critical Bug Fixes
 
 **1. Config Persistence Bug Fixed**
