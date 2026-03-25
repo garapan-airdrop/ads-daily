@@ -41,6 +41,7 @@ class TelegramMultiChannelBot {
         this.postingLocks = new Set();
         this.pendingUploads = new Map();
         this.uploadTimeouts = new Map();
+        this.conversationState = new Map(); // multi-step menu conversations
         
         // Rate limiting untuk 32 channels - lebih ringan
         this.rateLimiter = {
@@ -1090,7 +1091,9 @@ class TelegramMultiChannelBot {
         const keyboard = new InlineKeyboard()
             .text('📋 Daftar Channel', 'menu_channels').text('📁 Folder', 'menu_folders').row()
             .text('📊 Status Bot', 'menu_status').text('⚙️ Kontrol', 'menu_control').row()
-            .text('📤 Posting', 'menu_posting').text('🗑️ Hapus Pesan', 'menu_delete');
+            .text('📤 Posting', 'menu_posting').text('🗑️ Hapus Pesan', 'menu_delete').row()
+            .text('➕ Tambah Channel', 'menu_add_ch').text('➖ Hapus Channel', 'menu_remove_ch').row()
+            .text('🖼️ Kelola Media', 'menu_media');
 
         const opts = { parse_mode: 'Markdown', reply_markup: keyboard };
         if (edit) {
@@ -1241,9 +1244,151 @@ class TelegramMultiChannelBot {
         await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
     }
 
+    async showMediaMenu(ctx) {
+        const totalChannels = Object.values(this.channels).filter(c => c.enabled).length;
+
+        const text =
+            `🖼️ *KELOLA MEDIA*\n\n` +
+            `Total channel: *${totalChannels}*\n\n` +
+            `Pilih aksi:`;
+
+        const keyboard = new InlineKeyboard()
+            .text('➕ Upload Foto/Video ke Channel', 'menu_upload_pick_0').row()
+            .text('◀️ Menu Utama', 'menu_main');
+
+        await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+    }
+
+    async showUploadChannelList(ctx, page = 0) {
+        const allChannels = Object.entries(this.channels);
+        const itemsPerPage = 8;
+        const totalPages = Math.ceil(allChannels.length / itemsPerPage);
+
+        if (page < 0) page = 0;
+        if (page >= totalPages) page = totalPages - 1;
+
+        const start = page * itemsPerPage;
+        const end = Math.min(start + itemsPerPage, allChannels.length);
+        const pageChannels = allChannels.slice(start, end);
+
+        let text = `🖼️ *PILIH CHANNEL UNTUK UPLOAD* (${page + 1}/${totalPages})\n\nKlik channel tujuan:`;
+
+        const keyboard = new InlineKeyboard();
+        for (const [channelId, config] of pageChannels) {
+            keyboard.text(config.name, `menu_upload_ch_${channelId}`).row();
+        }
+
+        if (totalPages > 1) {
+            if (page > 0) keyboard.text('◀️ Prev', `menu_upload_pick_${page - 1}`);
+            keyboard.text(`${page + 1}/${totalPages}`, 'noop');
+            if (page < totalPages - 1) keyboard.text('Next ▶️', `menu_upload_pick_${page + 1}`);
+            keyboard.row();
+        }
+        keyboard.text('◀️ Kembali', 'menu_media');
+
+        await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+    }
+
+    async showRemoveChannelList(ctx, page = 0) {
+        const allChannels = Object.entries(this.channels);
+        const itemsPerPage = 8;
+        const totalPages = Math.ceil(allChannels.length / itemsPerPage);
+
+        if (page < 0) page = 0;
+        if (page >= totalPages) page = totalPages - 1;
+
+        const start = page * itemsPerPage;
+        const end = Math.min(start + itemsPerPage, allChannels.length);
+        const pageChannels = allChannels.slice(start, end);
+
+        let text = `➖ *HAPUS CHANNEL* (${page + 1}/${totalPages})\n\nKlik channel yang ingin dihapus:`;
+
+        const keyboard = new InlineKeyboard();
+        for (const [channelId, config] of pageChannels) {
+            keyboard.text(`🗑 ${config.name}`, `menu_rm_ask_${channelId}`).row();
+        }
+
+        if (totalPages > 1) {
+            if (page > 0) keyboard.text('◀️ Prev', `menu_remove_ch_p_${page - 1}`);
+            keyboard.text(`${page + 1}/${totalPages}`, 'noop');
+            if (page < totalPages - 1) keyboard.text('Next ▶️', `menu_remove_ch_p_${page + 1}`);
+            keyboard.row();
+        }
+        keyboard.text('◀️ Menu Utama', 'menu_main');
+
+        await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+    }
+
     // =============================================
     // END MENU SYSTEM
     // =============================================
+
+    async handleAddChannelStep(ctx, userId, text, conv) {
+        const cancelNote = `\n\n_Ketik /cancel untuk batal_`;
+
+        if (conv.step === 'channel_id') {
+            // Validate channel ID format
+            const id = text.trim();
+            if (!id.startsWith('@') && !id.startsWith('-')) {
+                await ctx.reply(`❌ Format salah. Channel ID harus diawali \`@\` (username) atau \`-100\` (group ID).\n\nCoba lagi:${cancelNote}`, { parse_mode: 'Markdown' });
+                return;
+            }
+            if (this.channels[id]) {
+                await ctx.reply(`⚠️ Channel \`${id}\` sudah ada di daftar.\n\nMasukkan ID lain:${cancelNote}`, { parse_mode: 'Markdown' });
+                return;
+            }
+            this.conversationState.set(userId, { action: 'add_channel', step: 'name', data: { id } });
+            await ctx.reply(`✅ ID: \`${id}\`\n\n📝 Masukkan *nama tampilan* channel:\n_(contoh: JavaPlay88 Official)_${cancelNote}`, { parse_mode: 'Markdown' });
+
+        } else if (conv.step === 'name') {
+            const name = text.trim();
+            if (name.length < 2) {
+                await ctx.reply(`❌ Nama terlalu pendek. Coba lagi:${cancelNote}`, { parse_mode: 'Markdown' });
+                return;
+            }
+            this.conversationState.set(userId, { action: 'add_channel', step: 'posting_time', data: { ...conv.data, name } });
+            await ctx.reply(`✅ Nama: *${name}*\n\n⏰ Masukkan *waktu posting* (format 24 jam):\n_(contoh: 13:00 atau 08:30)_${cancelNote}`, { parse_mode: 'Markdown' });
+
+        } else if (conv.step === 'posting_time') {
+            const time = text.trim();
+            if (!/^\d{1,2}:\d{2}$/.test(time)) {
+                await ctx.reply(`❌ Format waktu salah. Gunakan format \`HH:MM\`\n_(contoh: 13:00)_\n\nCoba lagi:${cancelNote}`, { parse_mode: 'Markdown' });
+                return;
+            }
+            this.conversationState.set(userId, { action: 'add_channel', step: 'folder', data: { ...conv.data, posting_time: time } });
+            const defaultFolder = conv.data.id.replace('@', '').toLowerCase();
+            await ctx.reply(
+                `✅ Waktu: *${time}* WIB\n\n` +
+                `📁 Masukkan *nama folder* untuk media channel:\n_(contoh: \`${defaultFolder}\`)_\n` +
+                `Folder akan dibuat di: \`assets/<nama_folder>\`${cancelNote}`,
+                { parse_mode: 'Markdown' }
+            );
+
+        } else if (conv.step === 'folder') {
+            const folderName = text.trim().replace(/[^a-zA-Z0-9_\-\.]/g, '').toLowerCase();
+            if (!folderName) {
+                await ctx.reply(`❌ Nama folder tidak valid. Gunakan huruf/angka saja.\n\nCoba lagi:${cancelNote}`, { parse_mode: 'Markdown' });
+                return;
+            }
+            this.conversationState.set(userId, { action: 'add_channel', step: 'confirm', data: { ...conv.data, folder: folderName } });
+            const d = { ...conv.data, folder: folderName };
+            const folderPath = `assets/${folderName}`;
+
+            const keyboard = new InlineKeyboard()
+                .text('✅ Simpan Channel', `menu_add_ch_save_${userId}`).row()
+                .text('❌ Batal', 'menu_main');
+
+            await ctx.reply(
+                `📋 *KONFIRMASI TAMBAH CHANNEL*\n\n` +
+                `📡 ID: \`${d.id}\`\n` +
+                `📝 Nama: *${d.name}*\n` +
+                `⏰ Waktu: *${d.posting_time}* WIB\n` +
+                `📁 Folder: \`${folderPath}\`\n\n` +
+                `Apakah data sudah benar?`,
+                { parse_mode: 'Markdown', reply_markup: keyboard }
+            );
+        }
+    }
 
     setupBotCommands() {
         // Handle text messages for commands
@@ -1262,6 +1407,22 @@ class TelegramMultiChannelBot {
             }
 
             try {
+                // ─── CONVERSATION STATE (multi-step menu) ─────────────────
+                const conv = this.conversationState.get(userId);
+                if (conv) {
+                    if (text === '/cancel' || text === '!cancel') {
+                        this.conversationState.delete(userId);
+                        await this.showMainMenu(ctx, false);
+                        return;
+                    }
+
+                    if (conv.action === 'add_channel') {
+                        await this.handleAddChannelStep(ctx, userId, text, conv);
+                        return;
+                    }
+                }
+                // ─────────────────────────────────────────────────────────
+
                 if (text === '/start' || text === '/menu' || text === '!menu') {
                     await this.showMainMenu(ctx, false);
                 } else if (text.startsWith('!add ')) {
@@ -1588,6 +1749,124 @@ class TelegramMultiChannelBot {
                         `Selesai memproses *${deletedCount}* channel.\n` +
                         `Total pesan dihapus: *${totalDeleted}*`,
                         { parse_mode: 'Markdown', reply_markup: keyboard2 }
+                    );
+
+                // ─── CHANNEL MANAGEMENT ──────────────────────────────────
+
+                } else if (data === 'menu_add_ch') {
+                    this.conversationState.set(userId, { action: 'add_channel', step: 'channel_id', data: {} });
+                    const keyboard = new InlineKeyboard().text('❌ Batal', 'menu_main');
+                    await ctx.editMessageText(
+                        `➕ *TAMBAH CHANNEL BARU*\n\n` +
+                        `Kirim *ID channel* Telegram:\n` +
+                        `• Username: \`@namachannel\`\n` +
+                        `• Channel ID: \`-100xxxxxxxxx\`\n\n` +
+                        `_Ketik /cancel untuk batal_`,
+                        { parse_mode: 'Markdown', reply_markup: keyboard }
+                    );
+
+                } else if (data.startsWith('menu_add_ch_save_')) {
+                    const targetUserId = parseInt(data.replace('menu_add_ch_save_', ''));
+                    const convData = this.conversationState.get(targetUserId);
+                    if (convData && convData.action === 'add_channel' && convData.step === 'confirm') {
+                        const d = convData.data;
+                        const folderPath = `assets/${d.folder}`;
+                        const newChannel = {
+                            id: d.id,
+                            name: d.name,
+                            posting_time: d.posting_time,
+                            timezone: 'Asia/Jakarta',
+                            image_folder: folderPath,
+                            promo_text: `Selamat datang di ${d.name}! Kunjungi kami untuk informasi terbaru.`,
+                            enabled: true,
+                            buttons: [],
+                            last_run: null
+                        };
+                        // Create folder
+                        try { await fs.mkdir(folderPath, { recursive: true }); } catch (_) {}
+                        // Add to channels
+                        this.channels[d.id] = newChannel;
+                        this.allChannels[d.id] = newChannel;
+                        await this.saveConfig();
+                        this.conversationState.delete(targetUserId);
+                        this.logger.info(`➕ Channel added via menu: ${d.id} by admin ${userId}`);
+                        const keyboard = new InlineKeyboard()
+                            .text('📋 Lihat Daftar Channel', 'menu_channels').text('🏠 Menu Utama', 'menu_main');
+                        await ctx.reply(
+                            `✅ *CHANNEL BERHASIL DITAMBAHKAN!*\n\n` +
+                            `📡 ID: \`${d.id}\`\n` +
+                            `📝 Nama: *${d.name}*\n` +
+                            `⏰ Waktu: *${d.posting_time}* WIB\n` +
+                            `📁 Folder: \`${folderPath}\`\n\n` +
+                            `⚠️ Jangan lupa upload foto/video ke folder tersebut dan atur promo text di config.`,
+                            { parse_mode: 'Markdown', reply_markup: keyboard }
+                        );
+                    } else {
+                        await ctx.reply('❌ Sesi expired. Silakan mulai lagi dari menu.');
+                    }
+
+                } else if (data === 'menu_remove_ch') {
+                    await this.showRemoveChannelList(ctx, 0);
+
+                } else if (data.startsWith('menu_remove_ch_p_')) {
+                    const page = parseInt(data.replace('menu_remove_ch_p_', ''));
+                    await this.showRemoveChannelList(ctx, page);
+
+                } else if (data.startsWith('menu_rm_ask_')) {
+                    const channelId = data.replace('menu_rm_ask_', '');
+                    const ch = this.channels[channelId];
+                    if (!ch) { await ctx.editMessageText('❌ Channel tidak ditemukan.'); return; }
+                    const keyboard = new InlineKeyboard()
+                        .text(`✅ Ya, Hapus "${ch.name}"`, `menu_rm_run_${channelId}`).row()
+                        .text('❌ Batal', 'menu_remove_ch');
+                    await ctx.editMessageText(
+                        `🗑️ *KONFIRMASI HAPUS CHANNEL*\n\n` +
+                        `Channel: *${ch.name}*\n` +
+                        `ID: \`${channelId}\`\n\n` +
+                        `⚠️ Channel akan dihapus dari daftar bot. Data history tetap tersimpan.`,
+                        { parse_mode: 'Markdown', reply_markup: keyboard }
+                    );
+
+                } else if (data.startsWith('menu_rm_run_')) {
+                    const channelId = data.replace('menu_rm_run_', '');
+                    const ch = this.channels[channelId];
+                    if (!ch) { await ctx.editMessageText('❌ Channel tidak ditemukan.'); return; }
+                    const chName = ch.name;
+                    delete this.channels[channelId];
+                    delete this.allChannels[channelId];
+                    await this.saveConfig();
+                    this.logger.info(`➖ Channel removed via menu: ${channelId} by admin ${userId}`);
+                    const keyboard = new InlineKeyboard()
+                        .text('◀️ Lihat Daftar', 'menu_remove_ch').text('🏠 Menu Utama', 'menu_main');
+                    await ctx.editMessageText(
+                        `✅ *Channel dihapus!*\n\n*${chName}* (\`${channelId}\`) telah dihapus dari bot.`,
+                        { parse_mode: 'Markdown', reply_markup: keyboard }
+                    );
+
+                // ─── MEDIA MANAGEMENT ─────────────────────────────────────
+
+                } else if (data === 'menu_media') {
+                    await this.showMediaMenu(ctx);
+
+                } else if (data.startsWith('menu_upload_pick_')) {
+                    const page = parseInt(data.replace('menu_upload_pick_', ''));
+                    await this.showUploadChannelList(ctx, page);
+
+                } else if (data.startsWith('menu_upload_ch_')) {
+                    const channelId = data.replace('menu_upload_ch_', '');
+                    const ch = this.channels[channelId];
+                    if (!ch) { await ctx.editMessageText('❌ Channel tidak ditemukan.'); return; }
+                    const folderPath = ch.image_folder || `assets/${channelId.replace('@', '')}`;
+                    // Set pendingUpload for this user
+                    this.pendingUploads.set(userId, path.basename(folderPath));
+                    const keyboard = new InlineKeyboard().text('❌ Batal', 'menu_media');
+                    await ctx.editMessageText(
+                        `🖼️ *UPLOAD MEDIA*\n\n` +
+                        `Channel: *${ch.name}*\n` +
+                        `Folder: \`${folderPath}\`\n\n` +
+                        `📤 Sekarang kirim *foto atau video* ke chat ini.\n` +
+                        `_Bot akan menyimpannya ke folder channel._`,
+                        { parse_mode: 'Markdown', reply_markup: keyboard }
                     );
 
                 // ─── LEGACY PAGINATION CALLBACKS ─────────────────────────
